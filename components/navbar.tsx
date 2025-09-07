@@ -4,13 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Moon, Sun, Globe, Menu, X } from "lucide-react";
+import { Moon, Sun, Globe, Menu, X, ExternalLink } from "lucide-react";
 import { useTheme } from "next-themes";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/components/visuals/ui";
 import { type Locale } from "@/lib/i18n";
 
 type Dict = Record<string, string>;
+
+const PORTFOLIO_URL = "https://www.raphaelcomandon-portfolio.fr";
 
 export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale }) {
   const pathname = usePathname();
@@ -29,7 +31,7 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
     { href: href(currentLocale, "experience"), label: dict.nav_experience },
     { href: href(currentLocale, "about"), label: dict.nav_about },
     { href: href(currentLocale, "relaxation"), label: dict.relaxation },
-    { href: href(currentLocale, "contact"), label: dict.nav_contact }
+    { href: href(currentLocale, "contact"), label: dict.nav_contact },
   ];
 
   useEffect(() => {
@@ -100,6 +102,18 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
               {l.label}
             </Link>
           ))}
+
+          <Link
+            href={PORTFOLIO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+            aria-label="Ouvrir le portfolio"
+          >
+            <ExternalLink className="h-4 w-4" />
+            <span>Portfolio</span>
+          </Link>
+
           {LangSwitcherDesktop}
           {ThemeButton}
         </div>
@@ -130,7 +144,7 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
             className="overflow-hidden md:hidden"
           >
             <div className="container mx-auto px-4 pb-4">
-              <div className="rounded-2xl border bg-white/80 p-2 shadow-sm backdrop-blur dark:border-white/10 dark:bg-black/60">
+              <div className="rounded-2xl border bg-white/80 p-2 shadow-sm backdrop-blur dark:border-white/10 dark:bg:black/60 dark:bg-opacity-60">
                 <div className="flex flex-col">
                   {links.map((l) => (
                     <Link
@@ -144,6 +158,17 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
                       {l.label}
                     </Link>
                   ))}
+
+                  <Link
+                    href={PORTFOLIO_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                    aria-label="Ouvrir le portfolio"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>Portfolio</span>
+                  </Link>
 
                   <div className="mt-2 flex items-center justify-between rounded-xl bg-black/[0.03] px-3 py-2 dark:bg-white/[0.06]">
                     <span className="text-sm opacity-80">Lang</span>

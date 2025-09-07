@@ -1,0 +1,39 @@
+{
+  "name": "json-analyzer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "node -e \"try{require('fs').mkdirSync('.next',{recursive:true})}catch(e){}\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "autoprefixer": "^10.4.20",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.0.0",
+    "framer-motion": "^11.3.31",
+    "lucide-react": "^0.460.0",
+    "next": "^15.0.0",
+    "next-themes": "^0.3.0",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-wrap-balancer": "^1.1.1",
+    "tailwind-merge": "^2.5.2",
+    "tailwindcss": "^3.4.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^9.11.1",
+    "eslint-config-next": "^15.0.0",
+    "typescript": "^5.6.2"
+  }
+}

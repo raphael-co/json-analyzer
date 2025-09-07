@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="R centré dans un C, fond bleu arrondi">
+  <!-- Fond bleu avec angles arrondis -->
+  <rect x="0" y="0" width="512" height="512" rx="48" ry="48" fill="rgb(36 99 235)"/>
+
+  <!-- C très grand en tracé (contour blanc épais, extrémités arrondies) -->
+  <path d="M356 83
+           A200 200 0 0 0 56 256
+           A200 200 0 0 0 356 429"
+        fill="none" stroke="white" stroke-width="80"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- R exactement centré -->
+  <text x="256" y="256" text-anchor="middle" dominant-baseline="central"
+        font-size="210" font-weight="900" fill="white"
+        font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">R</text>
+</svg>

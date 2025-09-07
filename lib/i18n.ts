@@ -6,7 +6,7 @@ export const defaultLocale: Locale = "fr";
 type Dict = Record<string, string>;
 
 const fr: Dict = {
-  "json.hero_title": "Analyseur JSON — Démo",
+  "json.hero_title": "Analyseur JSON — Beta",
   "json.hero_desc": "Colle un JSON ci-dessous ou ajoute ?json=… à l’URL. Supporte aussi b64:…",
   "json.hero_loading": "Chargement…",
 
@@ -51,7 +51,7 @@ const fr: Dict = {
 };
 
 const en: Dict = {
-  "json.hero_title": "JSON Analyzer — Demo",
+  "json.hero_title": "JSON Analyzer — Beta",
   "json.hero_desc": "Paste JSON below or add ?json=… in the URL. Also supports b64:…",
   "json.hero_loading": "Loading…",
 

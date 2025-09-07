@@ -4,14 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Moon, Sun, Globe, Menu, X, ExternalLink } from "lucide-react";
+import { Moon, Sun, Globe, Menu, X, ExternalLink, Github } from "lucide-react";
 import { useTheme } from "next-themes";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/components/visuals/ui";
 import { type Locale } from "@/lib/i18n";
 
 type Dict = Record<string, string>;
+
 const PORTFOLIO_URL = "https://www.raphaelcomandon-portfolio.fr";
+const GITHUB_URL = "https://github.com/raphael-co/json-analyzer";
 
 export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale }) {
   const pathname = usePathname();
@@ -76,12 +78,10 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
             priority
             className="h-6 w-6"
           />
-          <span className="font-semibold">Raphael Comandon</span>
+        <span className="font-semibold">Raphael Comandon</span>
         </Link>
 
-        {/* Desktop actions */}
         <div className="hidden items-center gap-3 md:flex md:gap-6">
-          {/* Bouton Portfolio (desktop) */}
           <Link
             href={PORTFOLIO_URL}
             target="_blank"
@@ -93,11 +93,21 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
             <span>Portfolio</span>
           </Link>
 
+          <Link
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+            aria-label="Ouvrir le dépôt GitHub"
+          >
+            <Github className="h-4 w-4" />
+            <span>GitHub</span>
+          </Link>
+
           {LangSwitcherDesktop}
           {ThemeButton}
         </div>
 
-        {/* Mobile toggles */}
         <div className="flex items-center gap-2 md:hidden">
           {ThemeButton}
           <button
@@ -113,7 +123,6 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
         </div>
       </nav>
 
-      {/* Mobile menu */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -136,6 +145,16 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
                   >
                     <ExternalLink className="h-4 w-4" />
                     <span>Portfolio</span>
+                  </Link>
+                  <Link
+                    href={GITHUB_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
+                    aria-label="Ouvrir le dépôt GitHub"
+                  >
+                    <Github className="h-4 w-4" />
+                    <span>GitHub</span>
                   </Link>
 
                   <div className="mt-2 flex items-center justify-between rounded-xl bg-black/[0.03] px-3 py-2 dark:bg-white/[0.06]">

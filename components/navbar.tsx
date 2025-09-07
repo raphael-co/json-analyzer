@@ -11,7 +11,6 @@ import { cn } from "@/components/visuals/ui";
 import { type Locale } from "@/lib/i18n";
 
 type Dict = Record<string, string>;
-
 const PORTFOLIO_URL = "https://www.raphaelcomandon-portfolio.fr";
 
 export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale }) {
@@ -24,15 +23,6 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
     segments[1] === "en" || segments[1] === "fr" ? (segments[1] as Locale) : locale;
   const restPath = segments.slice(2).join("/");
   const href = (l: string, p: string = "") => `/${l}/${p}`.replace(/\/$/, "");
-
-  const links = [
-    { href: href(currentLocale), label: dict.nav_home },
-    { href: href(currentLocale, "projects"), label: dict.nav_projects },
-    { href: href(currentLocale, "experience"), label: dict.nav_experience },
-    { href: href(currentLocale, "about"), label: dict.nav_about },
-    { href: href(currentLocale, "relaxation"), label: dict.relaxation },
-    { href: href(currentLocale, "contact"), label: dict.nav_contact },
-  ];
 
   useEffect(() => {
     setOpen(false);
@@ -89,20 +79,9 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
           <span className="font-semibold">Raphael Comandon</span>
         </Link>
 
+        {/* Desktop actions */}
         <div className="hidden items-center gap-3 md:flex md:gap-6">
-          {links.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={cn(
-                "text-sm opacity-70 hover:opacity-100",
-                pathname === l.href && "font-medium opacity-100"
-              )}
-            >
-              {l.label}
-            </Link>
-          ))}
-
+          {/* Bouton Portfolio (desktop) */}
           <Link
             href={PORTFOLIO_URL}
             target="_blank"
@@ -118,6 +97,7 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
           {ThemeButton}
         </div>
 
+        {/* Mobile toggles */}
         <div className="flex items-center gap-2 md:hidden">
           {ThemeButton}
           <button
@@ -133,6 +113,7 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
         </div>
       </nav>
 
+      {/* Mobile menu */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -144,21 +125,8 @@ export default function Navbar({ dict, locale }: { dict: Dict; locale: Locale })
             className="overflow-hidden md:hidden"
           >
             <div className="container mx-auto px-4 pb-4">
-              <div className="rounded-2xl border bg-white/80 p-2 shadow-sm backdrop-blur dark:border-white/10 dark:bg:black/60 dark:bg-opacity-60">
+              <div className="rounded-2xl border bg-white/80 p-2 shadow-sm backdrop-blur dark:border-white/10 dark:bg-black/60">
                 <div className="flex flex-col">
-                  {links.map((l) => (
-                    <Link
-                      key={l.href}
-                      href={l.href}
-                      className={cn(
-                        "rounded-xl px-3 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/10",
-                        pathname === l.href && "font-medium"
-                      )}
-                    >
-                      {l.label}
-                    </Link>
-                  ))}
-
                   <Link
                     href={PORTFOLIO_URL}
                     target="_blank"

@@ -1,0 +1,18 @@
+services:
+  web:
+    container_name: json-analyzer
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3003:3003"
+    restart: unless-stopped
+    networks:
+      - app-net
+
+volumes:
+  postgres-data:
+
+networks:
+  app-net:
+    driver: bridge

@@ -1,5 +1,5 @@
 export function GET() {
-  const domain = "https://www.raphaelcomandon-portfolio.fr";
+  const domain = "https://json-analyzer.raphaelcomandon-portfolio.fr";
   const body = [
     "User-agent: *",
     "Allow: /",

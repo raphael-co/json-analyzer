@@ -1,13 +1,19 @@
 "use client";
 
 import * as React from "react";
-import SpotlightCard from "../visuals/spotlight-card";
 import { getDict, type Locale } from "@/lib/i18n";
+import SpotlightCard from "../visuals/spotlight-card";
+
+export type JsonExplorerHandle = {
+  scrollToLine: (line: number) => void;
+  scrollToPointer: (pointer: string) => void;
+};
 
 type Props = {
   value: unknown | null;
   className?: string;
   locale?: Locale;
+  performanceMode?: boolean;
 };
 
 type Region = {
@@ -17,24 +23,28 @@ type Region = {
   closeChar: "}" | "]";
   startCol: number;
   trailingComma?: boolean;
+  depth: number; // ajout pour Collapse by level
 };
 
 type MatchPos = { line: number; start: number; end: number };
 
-export default function JsonExplorer({ value, className, locale = "fr" }: Props) {
+export default React.forwardRef<JsonExplorerHandle, Props>(function JsonExplorer(
+  { value, className, locale = "fr", performanceMode = false },
+  ref
+) {
   const dict = getDict(locale);
+  void performanceMode;
 
-  const pretty = React.useMemo(() => safeStringify(value, 2), [value]);
+  const fm = React.useMemo(() => formatWithMap(value, 2), [value]);
+  const pretty = fm.text;
+  const pathToLine = fm.pathToLine;
   const lines = React.useMemo(() => pretty.split(/\r?\n/), [pretty]);
 
   const regions = React.useMemo(() => {
     const r = buildFoldRegions(pretty);
     for (const reg of r.values()) reg.trailingComma = /,\s*$/.test(lines[reg.endLine] ?? "");
     return r;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pretty]);
-
-  const containerRef = React.useRef<HTMLDivElement>(null);
+  }, [pretty, lines]);
 
   const [collapsed, setCollapsed] = React.useState<Set<number>>(new Set());
 
@@ -42,15 +52,12 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
     (line: number, opts?: { recursive?: boolean }) => {
       const region = regions.get(line) ?? findEnclosingRegion(regions, line);
       if (!region) return;
-
       const start = region.startLine;
-
       setCollapsed((prev) => {
         const next = new Set(prev);
         const nested = collectNestedStarts(regions, region);
         const wasCollapsed = next.has(start);
         const recursive = !!opts?.recursive;
-
         if (wasCollapsed) {
           if (recursive) for (const l of nested) next.delete(l);
           else next.delete(start);
@@ -64,15 +71,33 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
     [regions]
   );
 
-  const collapseAll = React.useCallback(() => {
-    const allStarts = new Set<number>();
-    for (const k of regions.keys()) allStarts.add(k);
-    setCollapsed(allStarts);
-  }, [regions]);
+  // --- Actions barre outils ---
+  const expandAll = React.useCallback(() => setCollapsed(new Set()), []);
+  const collapseAll = React.useCallback(
+    () => setCollapsed(new Set(Array.from(regions.keys()))),
+    [regions]
+  );
+  const collapseToLevel = React.useCallback(
+    (lvl: number) => {
+      const set = new Set<number>();
+      for (const [start, r] of regions.entries()) if (r.depth >= lvl) set.add(start);
+      setCollapsed(set);
+    },
+    [regions]
+  );
 
-  const expandAll = React.useCallback(() => {
-    setCollapsed(new Set());
-  }, []);
+  const visibleLines = React.useMemo(() => {
+    if (!collapsed.size) return lines.map((_, i) => i);
+    const hidden = new Array<boolean>(lines.length).fill(false);
+    for (const start of collapsed) {
+      const reg = regions.get(start);
+      if (!reg) continue;
+      for (let i = reg.startLine + 1; i <= reg.endLine; i++) hidden[i] = true;
+    }
+    const vis: number[] = [];
+    for (let i = 0; i < lines.length; i++) if (!hidden[i]) vis.push(i);
+    return vis;
+  }, [collapsed, lines, regions]);
 
   const [findOpen, setFindOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -115,7 +140,6 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
       return;
     }
     setRegexError(null);
-
     const regs: MatchPos[] = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -126,7 +150,6 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
         const start = m.index;
         const end = start + (text?.length || 1);
         regs.push({ line: i, start, end });
-
         if (pattern.re.lastIndex === m.index) pattern.re.lastIndex++;
       }
     }
@@ -153,117 +176,104 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
         const target = matches[next];
         setCollapsed((prevSet) => {
           const nextSet = new Set(prevSet);
-          for (const r of regions.values()) {
+          for (const r of regions.values())
             if (r.startLine <= target.line && target.line <= r.endLine) nextSet.delete(r.startLine);
-          }
           return nextSet;
         });
-        setTimeout(() => {
-          const el = containerRef.current?.querySelector<HTMLElement>(
-            `[data-line="${target.line}"]`
-          );
-          el?.scrollIntoView({ block: "center" });
-        }, 0);
+        setTimeout(() => scrollToLineInternal(target.line, "center"), 0);
         return next;
       });
     },
     [matches, regions]
   );
 
-  const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      goTo(e.shiftKey ? -1 : 1);
-    }
+  const minimapMarkers = React.useMemo(() => {
+    if (!matches.length) return [] as number[];
+    const total = lines.length || 1;
+    return matches.map((m) => Math.max(0, Math.min(1, m.line / total)));
+  }, [matches, lines.length]);
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const itemSize = 20; // px
+
+  const scrollToLineInternal = (
+    lineNo: number,
+    align: "start" | "center" | "end" | "auto" = "center"
+  ) => {
+    const idx = visibleLines.indexOf(lineNo);
+    if (idx < 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const targetTop = idx * itemSize;
+    const h = el.clientHeight;
+    let top = targetTop;
+    if (align === "center") top = targetTop - Math.max(0, (h - itemSize) / 2);
+    else if (align === "end") top = targetTop - Math.max(0, h - itemSize);
+    const maxTop = Math.max(0, visibleLines.length * itemSize - h);
+    el.scrollTo({ top: Math.max(0, Math.min(top, maxTop)) });
   };
 
-  const renderedRows = React.useMemo(() => {
-    const rows: React.ReactNode[] = [];
-    const active = matches[activeIndex];
-
-    for (let i = 0; i < lines.length; i++) {
-      const regionAtStart = regions.get(i);
-
-      if (regionAtStart && collapsed.has(i)) {
-        rows.push(
-          <CodeRow
-            key={`row-${i}-collapsed`}
-            lineNo={i}
-            isClickable
-            showChevron
-            isCollapsed
-            onToggle={(opts) => toggle(i, opts)}
-            dict={dict}
-            dataLine={i}
-          >
-            {renderCollapsedLineWithGuides(lines, regionAtStart)}
-          </CodeRow>
-        );
-        i = regionAtStart.endLine;
-        continue;
-      }
-
-      const enclosing = findEnclosingRegion(regions, i);
-      const isClickable = !!enclosing;
-      const hasChevron = !!regionAtStart;
-      const startForToggle = regionAtStart ? i : enclosing?.startLine ?? i;
-
-      const ranges = matchesByLine.get(i) ?? [];
-      const activeStartOnThisLine =
-        active && active.line === i ? active.start : undefined;
-
-      rows.push(
-        <CodeRow
-          key={`row-${i}`}
-          lineNo={i}
-          isClickable={isClickable}
-          showChevron={hasChevron}
-          isCollapsed={enclosing ? collapsed.has(enclosing.startLine) : false}
-          onToggle={isClickable ? (opts) => toggle(startForToggle, opts) : undefined}
-          dict={dict}
-          dataLine={i}
-        >
-          {renderLineWithGuides(lines[i], ranges, activeStartOnThisLine)}
-        </CodeRow>
-      );
-    }
-    return rows;
-  }, [lines, regions, collapsed, toggle, dict, matchesByLine, matches, activeIndex]);
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      scrollToLine: (line) => scrollToLineInternal(line, "center"),
+      scrollToPointer: (ptr) => {
+        const ln = pathToLine.get(ptr);
+        if (typeof ln === "number") {
+          setCollapsed((prev) => {
+            const next = new Set(prev);
+            for (const r of regions.values()) if (r.startLine <= ln && ln <= r.endLine) next.delete(r.startLine);
+            return next;
+          });
+          setTimeout(() => scrollToLineInternal(ln, "center"), 16);
+        }
+      },
+    }),
+    [visibleLines, regions, pathToLine]
+  );
 
   return (
-    <SpotlightCard className={`rounded-2xl border p-4 dark:border-white/10 backdrop-blur w-full ${className ?? ""}`}>
-      <div className="mb-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={expandAll}
-          className="rounded-full border px-3 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
-          title={dict["json.explorer.expand_all"] ?? "Expand all"}
-        >
-          {dict["json.explorer.expand_all"] ?? "Expand all"}
-        </button>
-        <button
-          type="button"
-          onClick={collapseAll}
-          className="rounded-full border px-3 py-1.5 text-xs hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
-          title={dict["json.explorer.collapse_all"] ?? "Collapse all"}
-        >
-          {dict["json.explorer.collapse_all"] ?? "Collapse all"}
-        </button>
-        <span className="ml-2 text-xs opacity-60">
-          {dict["json.explorer.tip_recursive"] ?? "Tip: Alt/⌘/Ctrl+click = recursive toggle"}
-        </span>
-      </div>
+    <SpotlightCard
+      className="mt-10 rounded-2xl border p-4 dark:border-white/10 backdrop-blur max-w-full"
+      aria-label="JSON Analyzer"
+    >
+      <div className={`relative ${className ?? ""}`} role="treegrid" aria-label={dict["json.preview"] ?? "Aperçu JSON"}>
+        {/* Barre d’actions */}
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs opacity-80">
+          <button onClick={expandAll} className="rounded border px-2 py-1 dark:border-white/10">
+            {dict["json.explorer.expandAll"] ?? "Expand all"}
+          </button>
+          <button onClick={collapseAll} className="rounded border px-2 py-1 dark:border-white/10">
+            {dict["json.explorer.collapseAll"] ?? "Collapse all"}
+          </button>
+          <span className="mx-1 opacity-50">|</span>
+          <button onClick={() => collapseToLevel(1)} className="rounded border px-2 py-1 dark:border-white/10">
+            {dict["json.explorer.level1"] ?? "Level 1"}
+          </button>
+          <button onClick={() => collapseToLevel(2)} className="rounded border px-2 py-1 dark:border-white/10">
+            {dict["json.explorer.level2"] ?? "Level 2"}
+          </button>
+          <button onClick={() => collapseToLevel(3)} className="rounded border px-2 py-1 dark:border-white/10">
+            {dict["json.explorer.level3"] ?? "Level 3"}
+          </button>
+          <span className="mx-1 opacity-50">|</span>
+          <button onClick={() => setFindOpen((v) => !v)} className="rounded border px-2 py-1 dark:border-white/10">
+            {findOpen ? (dict["find.close"] ?? "Close Find") : (dict["find.open"] ?? "Find")}
+          </button>
+          <span className="ml-auto rounded border px-2 py-0.5 dark:border-white/10">
+            {Intl.NumberFormat().format(lines.length)} {dict["json.lines"] ?? "lines"}
+          </span>
+        </div>
 
-      <div className="relative">
+        {/* Find overlay */}
         {findOpen && (
           <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-lg border bg-white/90 px-2 py-1 shadow-md backdrop-blur dark:border-white/10 dark:bg-neutral-900/90">
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onFindKeyDown}
               placeholder={dict["find.placeholder"] ?? "Rechercher…"}
-              className="w-48 rounded-md border px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-sky-400/40 dark:border-white/10 dark:bg-white/5"
+              className="w-48 rounded-md border px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-sky-400/40 dark:border-white/10 dark:bg白/5"
             />
             <button
               type="button"
@@ -283,36 +293,21 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
             >
               ↓
             </button>
-
             <span className="px-1 text-xs tabular-nums opacity-70">
               {matches.length ? `${activeIndex + 1} / ${matches.length}` : "0 / 0"}
             </span>
-
             <label className="flex items-center gap-1 text-xs opacity-80">
-              <input
-                type="checkbox"
-                checked={matchCase}
-                onChange={(e) => setMatchCase(e.target.checked)}
-              />
+              <input type="checkbox" checked={matchCase} onChange={(e) => setMatchCase(e.target.checked)} />
               Aa
             </label>
             <label className="flex items-center gap-1 text-xs opacity-80">
-              <input
-                type="checkbox"
-                checked={useRegex}
-                onChange={(e) => setUseRegex(e.target.checked)}
-              />
+              <input type="checkbox" checked={useRegex} onChange={(e) => setUseRegex(e.target.checked)} />
               .*
             </label>
             <label className="flex items-center gap-1 text-xs opacity-80">
-              <input
-                type="checkbox"
-                checked={wholeWord}
-                onChange={(e) => setWholeWord(e.target.checked)}
-              />
+              <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} />
               W
             </label>
-
             <button
               type="button"
               onClick={() => setFindOpen(false)}
@@ -324,336 +319,155 @@ export default function JsonExplorer({ value, className, locale = "fr" }: Props)
           </div>
         )}
 
-        <div
-          ref={containerRef}
-          className="max-h-[70vh] overflow-auto rounded-lg border dark:border-white/10 dark:bg-white/5"
-        >
-          <div className="min-w-full font-mono text-[12px] leading-relaxed">
-            {renderedRows}
+        <div className="relative">
+          <div
+            ref={containerRef}
+            className="h-[600px] min-h-[200px] max-h-[80vh] w-full overflow-auto overscroll-contain resize-y"
+            role="rowgroup"
+            aria-rowcount={visibleLines.length}
+          >
+            {visibleLines.map((lineNo, visIdx) => {
+              const regionAtStart = regions.get(lineNo);
+              const enclosing = findEnclosingRegion(regions, lineNo);
+              const isClickable = !!enclosing;
+              const hasChevron = !!regionAtStart;
+              const isCollapsed = enclosing ? collapsed.has(enclosing.startLine) : false;
+              const startForToggle = regionAtStart ? lineNo : enclosing?.startLine ?? lineNo;
+              const ranges = matchesByLine.get(lineNo) ?? [];
+
+              return (
+                <div
+                  key={lineNo}
+                  className="grid grid-cols-[3rem,1fr] gap-3 px-3 py-0.5"
+                  style={{ height: itemSize, lineHeight: `${itemSize}px` }}
+                  role="row"
+                  aria-rowindex={lineNo + 1}
+                  data-vis-index={visIdx}
+                >
+                  <div className="flex select-none items-center justify-center pr-2 text-right text-xs opacity-45 tabular-nums">
+                    {lineNo + 1}
+                  </div>
+
+                  {/* IMPORTANT: min-w-0 pour autoriser la colonne à rétrécir et utiliser le scroll du conteneur */}
+                  <div
+                    role={isClickable ? "button" : undefined}
+                    tabIndex={isClickable ? 0 : -1}
+                    aria-expanded={isClickable ? !isCollapsed : undefined}
+                    // onClick={
+                    //   isClickable
+                    //     ? (e) => toggle(startForToggle, { recursive: !!(e.altKey || e.metaKey || e.ctrlKey) })
+                    //     : undefined
+                    // }
+                    onKeyDown={(e) => {
+                      if (!isClickable) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggle(startForToggle, { recursive: !!(e.altKey || e.metaKey || e.ctrlKey) });
+                      }
+                    }}
+                    className={`min-w-0 ${isClickable ? "cursor-pointer" : ""}`}
+                    title={
+                      isClickable
+                        ? isCollapsed
+                          ? dict["json.explorer.expand"] ?? "Expand"
+                          : dict["json.explorer.collapse"] ?? "Collapse"
+                        : ""
+                    }
+                  >
+                    <span className="inline-flex items-start gap-1">
+                      {hasChevron ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggle(startForToggle, { recursive: !!(e.altKey || e.metaKey || e.ctrlKey) });
+                          }}
+                          className="-ml-1 inline-flex h-4 w-4 items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10"
+                          aria-label={
+                            isCollapsed ? dict["json.explorer.expand"] ?? "Expand" : dict["json.explorer.collapse"] ?? "Collapse"
+                          }
+                          title={
+                            isCollapsed ? dict["json.explorer.expand"] ?? "Expand" : dict["json.explorer.collapse"] ?? "Collapse"
+                          }
+                        >
+                          <span className="inline-block text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
+                        </button>
+                      ) : (
+                        <span className="inline-block h-4 w-4 -ml-1" aria-hidden />
+                      )}
+                      <code className="whitespace-pre tabular-nums text-[11px]">{renderLine(lines[lineNo], ranges)}</code>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Minimap + match markers */}
+          <div className="absolute right-1 top-2 bottom-2 w-1 rounded bg-black/10 dark:bg-white/10">
+            {minimapMarkers.map((p, i) => (
+              <div
+                key={i}
+                className="absolute left-0 right-0 h-0.5"
+                style={{ top: `calc(${p * 100}% - 1px)` }}
+              />
+            ))}
           </div>
         </div>
-      </div>
 
-      <div className="mt-2 text-right text-xs opacity-60">
-        {dict["find.hint"] ?? "Press Ctrl/⌘+F to search"}
-        {regexError ? (
-          <span className="ml-2 rounded bg-red-500/10 px-2 py-0.5 text-red-700 dark:text-red-300">
-            {regexError}
-          </span>
-        ) : null}
+        <div className="mt-2 text-right text-xs opacity-60">
+          {dict["find.hint"] ?? "Press Ctrl/⌘+F to search"}
+          {regexError ? (
+            <span className="ml-2 rounded bg-red-500/10 px-2 py-0.5 text-red-700 dark:text-red-300">{regexError}</span>
+          ) : null}
+        </div>
       </div>
     </SpotlightCard>
   );
-}
+});
 
-function CodeRow({
-  lineNo,
-  isClickable,
-  showChevron,
-  isCollapsed,
-  onToggle,
-  children,
-  dict,
-  dataLine,
-}: {
-  lineNo: number;
-  isClickable: boolean;
-  showChevron: boolean;
-  isCollapsed: boolean;
-  onToggle?: (opts: { recursive: boolean }) => void;
-  children: React.ReactNode;
-  dict: ReturnType<typeof getDict>;
-  dataLine: number;
-}) {
-  const handleClickLine = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isClickable || !onToggle) return;
-    onToggle({ recursive: !!(e.altKey || e.metaKey || e.ctrlKey) });
-  };
-
-  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!isClickable || !onToggle) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onToggle({ recursive: !!(e.altKey || e.metaKey || e.ctrlKey) });
-    }
-  };
-
-  const handleChevronClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!isClickable || !onToggle) return;
-    e.stopPropagation();
-    onToggle({ recursive: !!(e.altKey || e.metaKey || e.ctrlKey) });
-  };
-
-  return (
-    <div className="grid grid-cols-[3rem,1fr] gap-3 px-3 py-0.5" data-line={dataLine}>
-      <div className="flex select-none items-center justify-center pr-2 text-right text-xs opacity-45 tabular-nums">
-        {lineNo + 1}
-      </div>
-
-      <div
-        role={isClickable ? "button" : undefined}
-        tabIndex={isClickable ? 0 : -1}
-        aria-expanded={isClickable ? !isCollapsed : undefined}
-        onClick={isClickable ? handleClickLine : undefined}
-        onKeyDown={handleKey}
-        className={`break-words ${isClickable ? "cursor-pointer" : ""}`}
-        title={isClickable ? (isCollapsed ? (dict["json.explorer.expand"] ?? "Expand") : (dict["json.explorer.collapse"] ?? "Collapse")) : ""}
-      >
-        <span className="inline-flex items-start gap-1">
-          {showChevron ? (
-            <button
-              type="button"
-              onClick={handleChevronClick}
-              className="-ml-1 inline-flex h-4 w-4 items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10"
-              aria-label={isCollapsed ? (dict["json.explorer.expand"] ?? "Expand") : (dict["json.explorer.collapse"] ?? "Collapse")}
-              title={isCollapsed ? (dict["json.explorer.expand"] ?? "Expand") : (dict["json.explorer.collapse"] ?? "Collapse")}
-            >
-              <span className="inline-block text-[10px]">{isCollapsed ? "▶" : "▼"}</span>
-            </button>
-          ) : (
-            <span className="inline-block h-4 w-4 -ml-1" aria-hidden />
-          )}
-          <code className="whitespace-pre tabular-nums">{children}</code>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function renderLineWithGuides(
-  line: string,
-  ranges: { start: number; end: number }[],
-  activeStart?: number
-): React.ReactNode[] {
-  const m = line.match(/^\s*/);
-  const lead = m ? m[0] : "";
-  const rest = line.slice(lead.length);
-
-  const rangesForRest = ranges
-    .map((r) => ({ start: r.start - lead.length, end: r.end - lead.length }))
-    .filter((r) => r.end > 0);
-
-  const guides = renderIndentGuides(lead);
-  const highlighted = renderHighlightedLine(rest, rangesForRest, activeStart !== undefined ? activeStart - lead.length : undefined);
-  return [...guides, ...highlighted];
-}
-
-function renderCollapsedLineWithGuides(lines: string[], region: Region) {
-  const startLineText = lines[region.startLine] ?? "";
-  const prefix = startLineText.slice(0, region.startCol);
-  const hasComma = !!region.trailingComma;
-
-  const out: React.ReactNode[] = [];
-  out.push(...renderIndentGuides(prefix));
-  const rest = prefix.replace(/^\s*/, "");
-  out.push(...renderHighlightedLine(rest));
-  out.push(
-    <span key="brace-open" className="text-slate-500 dark:text-slate-400">
-      {region.openChar}
-    </span>
-  );
-  out.push(
-    <span key="dots" className="opacity-60">
-      …
-    </span>
-  );
-  out.push(
-    <span key="brace-close" className="text-slate-500 dark:text-slate-400">
-      {region.closeChar}
-      {hasComma ? "," : ""}
-    </span>
-  );
-  return out;
-}
-
-function renderIndentGuides(lead: string): React.ReactNode[] {
-  const vis = lead.replace(/\t/g, "  ").length;
-  const levels = Math.floor(vis / 2);
-  const leftover = vis % 2;
-
-  const nodes: React.ReactNode[] = [];
-  for (let i = 0; i < levels; i++) {
-    nodes.push(
-      <span key={`g-${i}`} aria-hidden className="select-none text-slate-500/30 dark:text-slate-400/30">
-        {"│ "}
-      </span>
-    );
-  }
-  if (leftover) {
-    nodes.push(
-      <span key="g-half" aria-hidden className="select-none text-slate-500/30 dark:text-slate-400/30">
-        {"·"}
-      </span>
-    );
-  }
-  return nodes;
-}
-
-function buildFoldRegions(text: string) {
-  const regions = new Map<number, Region>();
-  let line = 0;
-  let col = 0;
-  const stack: Array<{ openChar: "{" | "["; line: number; col: number }> = [];
-  let inStr = false;
-  let escape = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-
-    if (ch === "\n") {
-      line++;
-      col = 0;
-      continue;
-    }
-
-    if (inStr) {
-      if (escape) {
-        escape = false;
-      } else if (ch === "\\") {
-        escape = true;
-      } else if (ch === '"') {
-        inStr = false;
-      }
-      col++;
-      continue;
-    } else {
-      if (ch === '"') {
-        inStr = true;
-        col++;
-        continue;
-      }
-
-      if (ch === "{" || ch === "[") {
-        stack.push({ openChar: ch as "{" | "[", line, col });
-      } else if (ch === "}" || ch === "]") {
-        const open = stack.pop();
-        if (open) {
-          const closeChar = ch === "}" ? "}" : "]";
-          const openChar = open.openChar;
-          regions.set(open.line, {
-            startLine: open.line,
-            endLine: line,
-            openChar,
-            closeChar,
-            startCol: open.col,
-          });
-        }
-      }
-      col++;
-    }
-  }
-  return regions;
-}
-
-function collectNestedStarts(regions: Map<number, Region>, root: Region): number[] {
-  const starts: number[] = [];
-  for (const [start, r] of regions.entries()) {
-    if (r.startLine >= root.startLine && r.endLine <= root.endLine) starts.push(start);
-  }
-  starts.sort((a, b) => a - b);
-  return starts;
-}
-
-function findEnclosingRegion(regions: Map<number, Region>, line: number): Region | undefined {
-  let winner: Region | undefined;
-  for (const r of regions.values()) {
-    if (r.startLine <= line && line <= r.endLine) {
-      if (!winner || (r.startLine >= winner.startLine && r.endLine <= winner.endLine)) {
-        winner = r;
-      }
-    }
-  }
-  return winner;
-}
-
-const TOKEN_RE =
-  /(\{|\}|\[|\]|:|,)|("(?:\\.|[^"\\])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\b(null)\b|(BigInt\([^)]+\))|(\[Function [^\]]+\])|(\[Circular\])/g;
-
-function renderHighlightedLine(
-  line: string,
-  searchRanges?: { start: number; end: number }[],
-  activeStart?: number
-): React.ReactNode[] {
+function renderLine(line: string, ranges: { start: number; end: number }[]) {
   const out: React.ReactNode[] = [];
   let last = 0;
-  let m: RegExpExecArray | null;
-  TOKEN_RE.lastIndex = 0;
-
+  const TOKEN_RE =
+    /(\{|\}|\[|\]|:|,)|("(?:\\.|[^"\\])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\b(null)\b/gmu;
   const emit = (text: string, start: number, cls: string | null) => {
     if (!text) return;
-    const segments = decorateWithSearch(text, start, searchRanges ?? [], activeStart);
-    if (!cls) {
-      segments.forEach((seg, i) =>
-        out.push(<React.Fragment key={`${start}-plain-${i}`}>{seg}</React.Fragment>)
-      );
-    } else {
-      out.push(
-        <span key={`${start}-${cls}`} className={cls}>
-          {segments}
-        </span>
-      );
-    }
+    const segs = decorateWithSearch(text, start, ranges);
+    if (!cls) segs.forEach((seg, i) => out.push(<React.Fragment key={`${start}-plain-${i}`}>{seg}</React.Fragment>));
+    else out.push(<span key={`${start}-${cls}`} className={cls}>{segs}</span>);
   };
-
+  let m: RegExpExecArray | null;
+  TOKEN_RE.lastIndex = 0;
   while ((m = TOKEN_RE.exec(line))) {
     const idx = m.index;
-    if (idx > last) {
-      const plain = line.slice(last, idx);
-      emit(plain, last, null);
-    }
-
-    if (m[1]) {
-      emit(m[1], idx, "text-slate-500 dark:text-slate-400");
-    } else if (m[2]) {
-      const end = TOKEN_RE.lastIndex;
-      const cls = isKeyString(line, end) ? "text-sky-700 dark:text-sky-300" : "text-emerald-700 dark:text-emerald-300";
-      emit(m[2], idx, cls);
-    } else if (m[3]) {
-      emit(m[3], idx, "text-fuchsia-700 dark:text-fuchsia-300");
-    } else if (m[4]) {
-      emit(m[4], idx, "text-amber-700 dark:text-amber-300");
-    } else if (m[5]) {
-      emit(m[5], idx, "opacity-60");
-    } else if (m[6] || m[7] || m[8]) {
-      emit(m[6] || m[7] || m[8], idx, "text-violet-700 dark:text-violet-300");
-    }
+    if (idx > last) emit(line.slice(last, idx), last, null);
+    if (m[1]) emit(m[1], idx, "text-slate-500 dark:text-slate-400");
+    else if (m[2]) emit(m[2], idx, isKeyString(line, TOKEN_RE.lastIndex) ? "text-sky-700 dark:text-sky-300" : "text-emerald-700 dark:text-emerald-300");
+    else if (m[3]) emit(m[3], idx, "text-fuchsia-700 dark:text-fuchsia-300");
+    else if (m[4]) emit(m[4], idx, "text-amber-700 dark:text-amber-300");
+    else if (m[5]) emit(m[5], idx, "opacity-60");
     last = TOKEN_RE.lastIndex;
   }
   if (last < line.length) emit(line.slice(last), last, null);
   return out;
 }
 
-function decorateWithSearch(
-  text: string,
-  globalStart: number,
-  ranges: { start: number; end: number }[],
-  activeStart?: number
-): React.ReactNode[] {
-  if (!ranges.length) return [text];
-
+function decorateWithSearch(text: string, globalStart: number, ranges: { start: number; end: number }[]) {
+  if (!ranges.length) return [text] as React.ReactNode[];
   const localRanges = ranges
     .map((r) => ({ start: r.start - globalStart, end: r.end - globalStart }))
     .filter((r) => r.end > 0 && r.start < text.length)
     .sort((a, b) => a.start - b.start);
-
-  if (!localRanges.length) return [text];
-
+  if (!localRanges.length) return [text] as React.ReactNode[];
   const out: React.ReactNode[] = [];
   let cursor = 0;
   for (const r of localRanges) {
     const s = Math.max(0, r.start);
     const e = Math.min(text.length, r.end);
     if (s > cursor) out.push(text.slice(cursor, s));
-    const isActive = activeStart !== undefined && globalStart + s === activeStart;
     out.push(
-      <mark
-        key={`${globalStart}-${s}`}
-        className={`rounded px-0.5 ${
-          isActive
-            ? "bg-amber-300 text-black dark:bg-amber-400"
-            : "bg-yellow-200 text-black dark:bg-yellow-300"
-        }`}
-      >
+      <mark key={`${globalStart}-${s}`} className="rounded px-0.5 bg-yellow-200 text-black dark:bg-yellow-300">
         {text.slice(s, e)}
       </mark>
     );
@@ -695,30 +509,161 @@ function buildPattern(
     return { ok: false, error: e?.message || "Invalid regex" };
   }
 }
-
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function safeStringify(val: unknown, space = 2): string {
-  try {
-    const seen = new WeakSet<object>();
-    const replacer = (_key: string, v: any) => {
-      if (typeof v === "bigint") return `BigInt(${v.toString()})`;
-      if (typeof v === "function") return `[Function ${v.name || "anonymous"}]`;
-      if (typeof v === "symbol") return v.toString();
-      if (v && typeof v === "object") {
-        if (seen.has(v)) return "[Circular]";
-        seen.add(v);
+function buildFoldRegions(text: string) {
+  const regions = new Map<number, Region>();
+  let line = 0;
+  let col = 0;
+  const stack: Array<{ openChar: "{" | "["; line: number; col: number; depth: number }> = [];
+  let inStr = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n") {
+      line++;
+      col = 0;
+      continue;
+    }
+    if (inStr) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inStr = false;
       }
-      return v;
-    };
-    return JSON.stringify(val, replacer, space) ?? "null";
-  } catch {
-    try {
-      return String(val);
-    } catch {
-      return "« unable to render JSON »";
+      col++;
+      continue;
+    } else {
+      if (ch === '"') {
+        inStr = true;
+        col++;
+        continue;
+      }
+      if (ch === "{") {
+        stack.push({ openChar: "{", line, col, depth: stack.length });
+      } else if (ch === "[") {
+        stack.push({ openChar: "[", line, col, depth: stack.length });
+      } else if (ch === "}") {
+        const open = stack.pop();
+        if (open) {
+          regions.set(open.line, {
+            startLine: open.line,
+            endLine: line,
+            openChar: open.openChar,
+            closeChar: "}",
+            startCol: open.col,
+            depth: open.depth,
+          });
+        }
+      } else if (ch === "]") {
+        const open = stack.pop();
+        if (open) {
+          regions.set(open.line, {
+            startLine: open.line,
+            endLine: line,
+            openChar: open.openChar,
+            closeChar: "]",
+            startCol: open.col,
+            depth: open.depth,
+          });
+        }
+      }
+      col++;
     }
   }
+  return regions;
+}
+function collectNestedStarts(regions: Map<number, Region>, root: Region): number[] {
+  const starts: number[] = [];
+  for (const [start, r] of regions.entries())
+    if (r.startLine >= root.startLine && r.endLine <= root.endLine) starts.push(start);
+  starts.sort((a, b) => a - b);
+  return starts;
+}
+function findEnclosingRegion(regions: Map<number, Region>, line: number): Region | undefined {
+  let winner: Region | undefined;
+  for (const r of regions.values())
+    if (r.startLine <= line && line <= r.endLine) {
+      if (!winner || (r.startLine >= winner.startLine && r.endLine <= winner.endLine)) winner = r;
+    }
+  return winner;
+}
+
+function formatWithMap(val: unknown, space = 2): { text: string; pathToLine: Map<string, number> } {
+  const lines: string[] = [];
+  const pathToLine = new Map<string, number>();
+  const indent = (n: number) => " ".repeat(n);
+  const esc = (s: string) => JSON.stringify(s);
+  const ptrSeg = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");
+
+  const write = (v: any, d: number, ptr: string) => {
+    if (v === null) {
+      push("null");
+      return;
+    }
+    const t = typeof v;
+    if (t === "number" || t === "boolean") {
+      push(String(v));
+      return;
+    }
+    if (t === "string") {
+      push(JSON.stringify(v));
+      return;
+    }
+    if (typeof v === "bigint") {
+      push(JSON.stringify(`BigInt(${v.toString()})`));
+      return;
+    }
+    if (typeof v === "function") {
+      push(JSON.stringify(`[Function ${v.name || "anonymous"}]`));
+      return;
+    }
+    if (Array.isArray(v)) {
+      push("[");
+      nl();
+      for (let i = 0; i < v.length; i++) {
+        linebuf += indent(d + space);
+        pathToLine.set(`${ptr}/${i}`, lines.length);
+        write(v[i], d + space, `${ptr}/${i}`);
+        if (i < v.length - 1) linebuf += ",";
+        nl();
+      }
+      linebuf += indent(d) + "]";
+      return;
+    }
+    if (v && typeof v === "object") {
+      const ks = Object.keys(v);
+      push("{");
+      nl();
+      ks.forEach((k, idx) => {
+        linebuf += indent(d + space);
+        const keyStr = `${esc(k)}: `;
+        linebuf += keyStr;
+        pathToLine.set(`${ptr}/${ptrSeg(k)}`, lines.length);
+        write((v as any)[k], d + space, `${ptr}/${ptrSeg(k)}`);
+        if (idx < ks.length - 1) linebuf += ",";
+        nl();
+      });
+      linebuf += indent(d) + "}";
+      return;
+    }
+    push(JSON.stringify(String(v)));
+  };
+
+  let linebuf = "";
+  const push = (s: string) => {
+    linebuf += s;
+  };
+  const nl = () => {
+    lines.push(linebuf);
+    linebuf = "";
+  };
+
+  write(val, 0, "");
+  nl();
+  return { text: lines.join("\n"), pathToLine };
 }

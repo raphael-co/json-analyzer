@@ -32,7 +32,7 @@ export default function HeroJson({ locale }: { locale: Locale }) {
 
       <Suspense
         fallback={
-          <div className="relative z-10 grid min-h-[60vh] place-items-center px-4 py-24">
+          <div className="relative z-10 grid min-h-[60vh] place-items-center py-24">
             <div className="w-full">
               <motion.h1
                 initial={{ y: 20, opacity: 0 }}
@@ -78,7 +78,7 @@ function HeroJsonInner({ locale, dict }: { locale: Locale; dict: ReturnType<type
   const [parsed, setParsed] = React.useState<unknown | null>(null);
 
   return (
-    <div className="relative z-10 grid min-h-[60vh] place-items-center px-4 py-24">
+    <div className="relative z-10 grid min-h-[60vh] place-items-center py-24">
       <div className="w-full flex flex-col items-center justify-center gap-6">
         <Reveal
           variant="slide-down"
@@ -101,8 +101,10 @@ function HeroJsonInner({ locale, dict }: { locale: Locale; dict: ReturnType<type
             locale={currentLocale}
           />
         </Reveal>
-        <Reveal variant="slide-up" className="w-full" distance={150} delay={0.2}>
-          <JsonExplorer value={parsed} locale={currentLocale} />
+        <Reveal variant="slide-up" className="w-full overflow-x-auto" distance={150} delay={0.2}>
+          <div className="min-w-0">
+            <JsonExplorer value={parsed} locale={currentLocale} />
+          </div>
         </Reveal>
       </div>
     </div>
